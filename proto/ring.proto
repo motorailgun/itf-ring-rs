@@ -6,11 +6,6 @@ message JoinRequest {
 	string address = 1;
 }
 
-message JoinReply {
-	string prev = 1;
-	string next = 2;
-}
-
 message SetPrevRequest {
 	string address = 1;
 }
@@ -20,7 +15,7 @@ message SetNextRequest {
 }
 
 service Ring {
-	rpc Join (JoinRequest) returns (JoinReply);
+	rpc Join (JoinRequest) returns (google.protobuf.Empty);
 	rpc SetPrev (SetPrevRequest) returns (google.protobuf.Empty);
 	rpc SetNext (SetNextRequest) returns (google.protobuf.Empty);
 }
