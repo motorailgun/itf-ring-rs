@@ -1,10 +1,10 @@
-pub mod ring_node;
+pub mod rpc_server;
 pub mod node;
 
 use std::net::SocketAddr;
 
 use log::info;
-use ring_node::RingNode;
+use rpc_server::RingNode;
 use rand::Rng;
 
 pub mod ring {
