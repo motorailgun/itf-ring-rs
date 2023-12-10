@@ -45,19 +45,29 @@ impl Node {
         let worker = tokio::spawn(async move {
             while let Some(message) = reciever.recv().await {
                 match message {
-                    NodeMessage::Join(_address) => {
-                        println!("Joining");
+                    NodeMessage::Join(address) => {
+                        debug!("Joining to ring at {}", address.clone());
+                        let result = node.join(address, String::from("http")).await;
+                        match result {
+                            Ok(_) => {
+                                debug!("Joined to ring");
+                            },
+                            Err(e) => {
+                                warn!("Joining to ring failed: {}", e);
+                            },
+                        }
                     },
                     NodeMessage::Leave => {
                         println!("Leaving");
+                        let _result = node.leave().await;
                     },
                     NodeMessage::SetNext(address) => {
                         debug!("Setting next to {}", address);
-                        node.next = address;
+                        node.set_next(address).await;
                     },
                     NodeMessage::SetPrev(address) => {
                         debug!("Setting prev to {}", address);
-                        node.prev = address;
+                        node.set_prev(address).await;
                     },
                 }
             }
