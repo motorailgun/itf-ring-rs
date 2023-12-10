@@ -35,14 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
     let my_address: String = format!("127.0.0.1:{}", my_port);
-    let node = RingNode::new(my_address.clone()).unwrap();
-    let server = tonic::transport::Server::builder()
-        .add_service(ring::ring_server::RingServer::new(node))
-        .serve(my_address.parse().unwrap());
+    let mut node = RingNode::new(my_address.clone()).unwrap();
 
     match join_address() {
         Ok(address) => {
-            // node.join(&address.parse().unwrap()).await?;
+            info!("my address: {}", my_address);
+            info!("joining ring {}", address);
+            node.join_ex(&address.parse().unwrap()).await?;
         },
         Err(e) => {
             match e {
@@ -57,6 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    server.await?;
+    tonic::transport::Server::builder()
+        .add_service(ring::ring_server::RingServer::new(node))
+        .serve(my_address.parse().unwrap())
+        .await?;
+
     Ok(())
 }
