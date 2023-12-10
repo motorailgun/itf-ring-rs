@@ -1,4 +1,5 @@
 pub mod ring_node;
+pub mod node;
 
 use std::net::SocketAddr;
 
