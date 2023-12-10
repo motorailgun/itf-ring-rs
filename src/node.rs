@@ -1,6 +1,9 @@
 use tokio::{sync::mpsc, task::JoinHandle};
 use log::*;
 
+use crate::ring::*;
+use tonic::Request;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeMessage {
     Join(String),
@@ -16,8 +19,8 @@ pub struct Node {
 }
 
 #[derive(Debug)]
-struct NodeInfo {
-    #[allow(dead_code)]
+struct NodeState {
+    lock: tokio::sync::Mutex<()>,
     address: String,
     prev: String,
     next: String,
@@ -31,7 +34,8 @@ impl Node {
 
     pub fn new(address: std::net::SocketAddr) -> Node {
         let address = address.to_string();
-        let mut node = NodeInfo {
+        let mut node = NodeState {
+            lock: tokio::sync::Mutex::new(()),
             address: address.clone(),
             prev: address.clone(),
             next: address,
@@ -64,5 +68,49 @@ impl Node {
             sender,
             worker,
         }
+    }
+}
+
+impl NodeState {
+    pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn std::error::Error>> {
+        let client = ring_client::RingClient::connect(format!("{}://{}", protocol, address)).await;
+        match client {
+            Ok(mut client) => {
+                let _lock = self.lock.lock().await;
+                let res = client.join(Request::new(JoinRequest {
+                    address: self.address.clone(),
+                })).await;
+
+                match res {
+                    Ok(res) => {
+                        let JoinReply{prev, next} = res.into_inner();
+                        self.prev = prev;
+                        self.next = next;
+                    },
+                    Err(e) => return Err(Box::new(e)),
+                };
+
+                debug!("{:?}", self);
+                Ok(())
+            },
+            Err(e) => {
+                warn!("join: failed to connect {}, {}", address, e);
+                Err(Box::new(e))
+            }
+        }
+    }
+
+    pub async fn set_next(&mut self, address: String) {
+        let _lock = self.lock.lock().await;
+        self.next = address;
+    }
+
+    pub async fn set_prev(&mut self, address: String) {
+        let _lock = self.lock.lock().await;
+        self.prev = address;
+    }
+
+    pub async fn leave(&self) -> Result<(), Box<dyn std::error::Error>> {
+        unimplemented!();
     }
 }
