@@ -1,0 +1,21 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+package ring;
+
+message JoinRequest {
+	string address = 1;
+}
+
+message SetPrevRequest {
+	string address = 1;
+}
+
+message SetNextRequest {
+	string address = 1;
+}
+
+service Ring {
+	rpc Join (JoinRequest) returns (google.protobuf.Empty);
+	rpc SetPrev (SetPrevRequest) returns (google.protobuf.Empty);
+	rpc SetNext (SetNextRequest) returns (google.protobuf.Empty);
+}
