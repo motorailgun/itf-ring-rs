@@ -1,4 +1,4 @@
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::sync::mpsc;
 use log::*;
 
 use crate::ring::*;
@@ -7,15 +7,15 @@ use tonic::Request;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeMessage {
     Join(String),
+    JoinExisting(String),
     Leave,
     SetNext(String),
     SetPrev(String),
 }
 
+#[derive(Debug, Clone)]
 pub struct Node {
     sender: mpsc::Sender<NodeMessage>,
-    #[allow(dead_code)]
-    worker: JoinHandle<()>,
 }
 
 #[derive(Debug)]
@@ -46,8 +46,12 @@ impl Node {
             while let Some(message) = reciever.recv().await {
                 match message {
                     NodeMessage::Join(address) => {
+                        debug!("Appending new node: {}", address.clone());
+                        node.join(address, String::from("http")).await;
+                    },
+                    NodeMessage::JoinExisting(address) => {
                         debug!("Joining to ring at {}", address.clone());
-                        let result = node.join(address, String::from("http")).await;
+                        let result = node.join_existing(address, String::from("http")).await;
                         match result {
                             Ok(_) => {
                                 debug!("Joined to ring");
@@ -60,6 +64,7 @@ impl Node {
                     NodeMessage::Leave => {
                         println!("Leaving");
                         let _result = node.leave().await;
+                        break;
                     },
                     NodeMessage::SetNext(address) => {
                         debug!("Setting next to {}", address);
@@ -71,18 +76,30 @@ impl Node {
                     },
                 }
             }
+
+            reciever.close();
         });
 
 
         Node {
             sender,
-            worker,
         }
     }
 }
 
 impl NodeState {
-    pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn join(&mut self, address: String, protocol: String) {
+        let _lock = self.lock.lock().await;
+        let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await.unwrap();
+        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await.unwrap();
+        let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
+        let _ = joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await;
+        let _ = joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await;
+
+        self.next = address;
+    }
+
+    pub async fn join_existing(&mut self, address: String, protocol: String) -> Result<(), Box<dyn std::error::Error>> {
         let client = ring_client::RingClient::connect(format!("{}://{}", protocol, address)).await;
         match client {
             Ok(mut client) => {
@@ -92,16 +109,9 @@ impl NodeState {
                 })).await;
 
                 match res {
-                    Ok(res) => {
-                        let JoinReply{prev, next} = res.into_inner();
-                        self.prev = prev;
-                        self.next = next;
-                    },
-                    Err(e) => return Err(Box::new(e)),
-                };
-
-                debug!("{:?}", self);
-                Ok(())
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(Box::new(e)),
+                }
             },
             Err(e) => {
                 warn!("join: failed to connect {}, {}", address, e);

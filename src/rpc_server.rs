@@ -1,85 +1,33 @@
 use log::*;
-use std::error::Error;
-use std::net::{AddrParseError, SocketAddr};
-use tokio::sync::Mutex;
+use std::net::SocketAddr;
 use tonic::{Request, Response, Status};
 
 use crate::ring::*;
-
+use crate::node::NodeMessage;
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Handler {
     address: String,
-    prev: Mutex<String>,
-    next: Mutex<String>,
+    sender: mpsc::Sender<NodeMessage>,
 }
 
 impl Handler {
-    pub fn new(address: String) -> Result<Self, AddrParseError> {
-        // assume legit address
-        let res = address.parse::<SocketAddr>();
-        match res {
-            Ok(_) => Ok(Handler {
-                address: address.clone(),
-                prev: Mutex::new(address.clone()),
-                next: Mutex::new(address),
-            }),
-            Err(e) => Err(e),
-        }
-    }
-
-    pub async fn join_ex(&mut self, address: &SocketAddr) -> Result<(), Box<dyn Error>> {
-        let client = ring_client::RingClient::connect(format!("http://{}", address.to_string())).await;
-        match client {
-            Ok(mut client) => {
-                let res = client.join(Request::new(JoinRequest {
-                    address: self.address.clone(),
-                })).await;
-
-                match res {
-                    Ok(res) => {
-                        let JoinReply{prev, next} = res.into_inner();
-                        let mut my_prev = self.prev.lock().await;
-                        let mut my_next = self.next.lock().await;
-                        *my_prev = prev;
-                        *my_next = next;
-                    },
-                    Err(e) => return Err(Box::new(e)),
-                };
-
-                debug!("{:?}", self);
-                Ok(())
-            },
-            Err(e) => {
-                warn!("join: failed to connect {}, {}", address, e);
-                Err(Box::new(e))
-            }
-        }
-    }
-
-    pub async fn leave(&self) -> Result<(), Box<dyn Error>> {
-        unimplemented!();
+    pub fn new(address: SocketAddr, sender: mpsc::Sender<NodeMessage>) -> Self {
+        Handler { address: address.to_string(), sender }
     }
 }
 
 #[tonic::async_trait]
 impl ring_server::Ring for Handler {
-    async fn join(&self, request: Request<JoinRequest>) -> Result<Response<JoinReply>, Status> {
+    async fn join(&self, request: Request<JoinRequest>) -> Result<Response<()>, Status> {
         info!("received join request");
         let address = request.into_inner().address;
 
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                let old_next = self.next.lock().await.clone();
-                let mut next_client = ring_client::RingClient::connect(format!("http://{}", old_next.clone())).await.unwrap();
-                let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
-                let mut my_next = self.next.lock().await;
-                *my_next = address;
-
-                Ok(Response::new(JoinReply {
-                    prev: self.address.clone(),
-                    next: old_next,
-                }))
+                self.sender.send(NodeMessage::Join(address)).await.unwrap();
+                Ok(Response::new(()))
             }
             Err(e) => {
                 error!("join: failed to parse address {}: {}", address, e);
@@ -93,8 +41,7 @@ impl ring_server::Ring for Handler {
         let address = request.into_inner().address;
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                let mut my_next = self.next.lock().await;
-                *my_next = address;
+                self.sender.send(NodeMessage::SetNext(address)).await.unwrap();
                 Ok(Response::new(()))
             }
             Err(e) => {
@@ -109,8 +56,7 @@ impl ring_server::Ring for Handler {
         let address = request.into_inner().address;
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                let mut my_prev = self.prev.lock().await;
-                *my_prev = address;
+                self.sender.send(NodeMessage::SetPrev(address)).await.unwrap();
                 Ok(Response::new(()))
             }
             Err(e) => {
