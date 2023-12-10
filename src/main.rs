@@ -4,7 +4,7 @@ pub mod node;
 use std::net::SocketAddr;
 
 use log::info;
-use rpc_server::RingNode;
+use rpc_server::Handler;
 use rand::Rng;
 
 pub mod ring {
@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
     let my_address: String = format!("127.0.0.1:{}", my_port);
-    let mut node = RingNode::new(my_address.clone()).unwrap();
+    let mut node = Handler::new(my_address.clone()).unwrap();
 
     match join_address() {
         Ok(address) => {

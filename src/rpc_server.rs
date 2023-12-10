@@ -8,18 +8,18 @@ use crate::ring::*;
 
 
 #[derive(Debug)]
-pub struct RingNode {
+pub struct Handler {
     address: String,
     prev: Mutex<String>,
     next: Mutex<String>,
 }
 
-impl RingNode {
+impl Handler {
     pub fn new(address: String) -> Result<Self, AddrParseError> {
         // assume legit address
         let res = address.parse::<SocketAddr>();
         match res {
-            Ok(_) => Ok(RingNode {
+            Ok(_) => Ok(Handler {
                 address: address.clone(),
                 prev: Mutex::new(address.clone()),
                 next: Mutex::new(address),
@@ -63,7 +63,7 @@ impl RingNode {
 }
 
 #[tonic::async_trait]
-impl ring_server::Ring for RingNode {
+impl ring_server::Ring for Handler {
     async fn join(&self, request: Request<JoinRequest>) -> Result<Response<JoinReply>, Status> {
         info!("received join request");
         let address = request.into_inner().address;
