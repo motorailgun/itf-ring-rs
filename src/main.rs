@@ -42,12 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(ring::ring_server::RingServer::new(handler))
         .serve(my_address);
 
-
+    
     match join_address() {
         Ok(address) => {
             info!("my address: {}", my_address);
             info!("joining ring {}", address);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             node.send_message(node::NodeMessage::JoinExisting(address)).await?;
         },
         Err(e) => {

@@ -88,7 +88,7 @@ impl Node {
                     },
                 };
 
-                node.show_state();
+                node.show_state().await;
                 res
             }
 
@@ -104,9 +104,9 @@ impl Node {
     pub async fn send_message(&self, message: NodeMessage) -> Result<(), Box<dyn Error>> {
         let (tx, rx) = oneshot::channel::<Result<(), Box<dyn Error + Send + Sync>>>();
         let check_rx = || async move {
-            match rx.await? {
-                Ok(_) => Ok(()),
-                _ => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "failed to receive arc output")) as Box<dyn Error>),
+            match rx.await {
+                Ok(p) => p.map_err(|e| e as Box<dyn Error>),
+                _ => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "failed to receive channel output")) as Box<dyn Error>),
             }
         };
 
@@ -122,7 +122,7 @@ impl Node {
             },
             NodeMessage::Leave => {
                 self.sender.send(WorkerMessage::Leave(tx)).await?;
-                check_rx().await
+                check_rx().await as Result<(), Box<dyn Error>>
             },
             NodeMessage::SetNext(address) => {
                 self.sender.send(WorkerMessage::SetNext(address)).await.map_err(|e| Box::new(e).into())
@@ -138,11 +138,11 @@ impl NodeState {
     pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _lock = self.lock.lock().await;
         debug!("join message: {}", &address);
-        let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await?;
-        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await?;
-        let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
-        let _ = joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await;
-        let _ = joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await;
+        let mut joinner_client = dbg!(ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await)?;
+        let mut next_client = dbg!(ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await)?;
+        let _ = dbg!(next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await);
+        let _ = dbg!(joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await);
+        let _ = dbg!(joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await);
 
         self.next = address;
         Ok(())
@@ -172,10 +172,11 @@ impl NodeState {
         unimplemented!();
     }
 
-    pub fn show_state(&self) {
+    pub async fn show_state(&self) {
+        let _lock = self.lock.lock().await;
         debug!("Node state:");
-        debug!("  address: {}", self.address);
-        debug!("  prev: {}", self.prev);
-        debug!("  next: {}", self.next);
+        debug!("  address: {}", &self.address);
+        debug!("  prev: {}", &self.prev);
+        debug!("  next: {}", &self.next);
     }
 }
