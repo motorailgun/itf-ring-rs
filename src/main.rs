@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(address) => {
             info!("my address: {}", my_address);
             info!("joining ring {}", address);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             node.send_message(node::NodeMessage::JoinExisting(address)).await?;
         },
         Err(e) => {

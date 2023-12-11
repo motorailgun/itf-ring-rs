@@ -53,7 +53,7 @@ impl Node {
 
         let _worker = tokio::spawn(async move {
             while let Some(message) = reciever.recv().await {
-                match message {
+                let res = match message {
                     WorkerMessage::Join(address, tx) => {
                         debug!("Appending new node: {}", address.clone());
                         let _ = tx.send(Arc::new(node.join(address, String::from("http")).await));
@@ -73,7 +73,7 @@ impl Node {
                         let _ = tx.send(Arc::new(result));
                     },
                     WorkerMessage::Leave(tx) => {
-                        println!("Leaving");
+                        info!("Leaving");
                         let result = node.leave().await;
                         let _ = tx.send(Arc::new(result));
                         break;
@@ -86,7 +86,10 @@ impl Node {
                         debug!("Setting prev to {}", address);
                         node.set_prev(address).await;
                     },
-                }
+                };
+
+                node.show_state();
+                res
             }
 
             reciever.close();
@@ -100,15 +103,25 @@ impl Node {
 
     pub async fn send_message(&self, message: NodeMessage) -> Result<(), Box<dyn Error>> {
         let (tx, rx) = oneshot::channel::<Arc<Result<(), Box<dyn Error + Send + Sync>>>>();
+        let check_rx = || async move {
+            match Arc::try_unwrap(rx.await?) {
+                Ok(Ok(())) => Ok(()),
+                _ => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "failed to receive arc output")) as Box<dyn Error>),
+            }
+        };
+
         match message {
             NodeMessage::Join(address) => {
                 self.sender.send(WorkerMessage::Join(address, tx)).await?;
+                check_rx().await?;
             },
             NodeMessage::JoinExisting(address) => {
                 self.sender.send(WorkerMessage::JoinExisting(address, tx)).await?;
+                dbg!(check_rx().await)?;
             },
             NodeMessage::Leave => {
                 self.sender.send(WorkerMessage::Leave(tx)).await?;
+                check_rx().await?;
             },
             NodeMessage::SetNext(address) => {
                 self.sender.send(WorkerMessage::SetNext(address)).await?;
@@ -118,16 +131,14 @@ impl Node {
             },
         };
 
-        match Arc::try_unwrap(rx.await?) {
-            Ok(Ok(())) => Ok(()),
-            _ => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "failed to join"))),
-        }
+        Ok(())
     }
 }
 
 impl NodeState {
     pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _lock = self.lock.lock().await;
+        debug!("join message: {}", &address);
         let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await?;
         let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await?;
         let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
@@ -139,6 +150,7 @@ impl NodeState {
     }
 
     pub async fn join_existing(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+        debug!("join_existing message: {}", &address);
         let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, address)).await?;
         let _lock = self.lock.lock().await;
         client.join(Request::new(JoinRequest {address: self.address.clone() })).await?;
@@ -147,15 +159,24 @@ impl NodeState {
 
     pub async fn set_next(&mut self, address: String) {
         let _lock = self.lock.lock().await;
+        debug!("set_next message: {}", &address);
         self.next = address;
     }
 
     pub async fn set_prev(&mut self, address: String) {
         let _lock = self.lock.lock().await;
+        debug!("set_prev message: {}", &address);
         self.prev = address;
     }
 
     pub async fn leave(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         unimplemented!();
+    }
+
+    pub fn show_state(&self) {
+        debug!("Node state:");
+        debug!("  address: {}", self.address);
+        debug!("  prev: {}", self.prev);
+        debug!("  next: {}", self.next);
     }
 }

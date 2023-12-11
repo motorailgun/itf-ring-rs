@@ -25,8 +25,14 @@ impl ring_server::Ring for Handler {
 
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                self.sender.send_message(NodeMessage::Join(address)).await.unwrap();
-                Ok(Response::new(()))
+                let res = self.sender.send_message(NodeMessage::Join(address)).await;
+                match res {
+                    Ok(_) => Ok(Response::new(())),
+                    Err(e) => {
+                        error!("join: failed to send message: {}", e);
+                        Err(Status::internal("failed to send message"))
+                    }
+                }
             }
             Err(e) => {
                 error!("join: failed to parse address {}: {}", address, e);
