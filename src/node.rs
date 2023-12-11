@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
 use log::*;
 
@@ -16,9 +16,9 @@ pub enum NodeMessage {
 
 #[derive(Debug)]
 enum WorkerMessage {
-    Join(String, oneshot::Sender<Arc<Result<(), Box<dyn Error + Send + Sync>>>>),
-    JoinExisting(String, oneshot::Sender<Arc<Result<(), Box<dyn Error + Send + Sync>>>>),
-    Leave(oneshot::Sender<Arc<Result<(), Box<dyn Error + Send + Sync>>>>),
+    Join(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
+    JoinExisting(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
+    Leave(oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     SetNext(String),
     SetPrev(String),
 }
@@ -56,7 +56,7 @@ impl Node {
                 let res = match message {
                     WorkerMessage::Join(address, tx) => {
                         debug!("Appending new node: {}", address.clone());
-                        let _ = tx.send(Arc::new(node.join(address, String::from("http")).await));
+                        let _ = tx.send(node.join(address, String::from("http")).await);
                     },
                     WorkerMessage::JoinExisting(address, tx) => {
                         debug!("Joining to ring at {}", address.clone());
@@ -70,12 +70,12 @@ impl Node {
                             },
                         }
 
-                        let _ = tx.send(Arc::new(result));
+                        let _ = tx.send(result);
                     },
                     WorkerMessage::Leave(tx) => {
                         info!("Leaving");
                         let result = node.leave().await;
-                        let _ = tx.send(Arc::new(result));
+                        let _ = tx.send(result);
                         break;
                     },
                     WorkerMessage::SetNext(address) => {
@@ -102,36 +102,35 @@ impl Node {
     }
 
     pub async fn send_message(&self, message: NodeMessage) -> Result<(), Box<dyn Error>> {
-        let (tx, rx) = oneshot::channel::<Arc<Result<(), Box<dyn Error + Send + Sync>>>>();
+        let (tx, rx) = oneshot::channel::<Result<(), Box<dyn Error + Send + Sync>>>();
         let check_rx = || async move {
-            match Arc::try_unwrap(rx.await?) {
-                Ok(Ok(())) => Ok(()),
+            match rx.await? {
+                Ok(_) => Ok(()),
                 _ => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "failed to receive arc output")) as Box<dyn Error>),
             }
         };
 
+
         match message {
             NodeMessage::Join(address) => {
                 self.sender.send(WorkerMessage::Join(address, tx)).await?;
-                check_rx().await?;
+                check_rx().await
             },
             NodeMessage::JoinExisting(address) => {
                 self.sender.send(WorkerMessage::JoinExisting(address, tx)).await?;
-                dbg!(check_rx().await)?;
+                check_rx().await
             },
             NodeMessage::Leave => {
                 self.sender.send(WorkerMessage::Leave(tx)).await?;
-                check_rx().await?;
+                check_rx().await
             },
             NodeMessage::SetNext(address) => {
-                self.sender.send(WorkerMessage::SetNext(address)).await?;
+                self.sender.send(WorkerMessage::SetNext(address)).await.map_err(|e| Box::new(e).into())
             },
             NodeMessage::SetPrev(address) => {
-                self.sender.send(WorkerMessage::SetPrev(address)).await?;
+                self.sender.send(WorkerMessage::SetPrev(address)).await.map_err(|e| Box::new(e).into())
             },
-        };
-
-        Ok(())
+        }
     }
 }
 
