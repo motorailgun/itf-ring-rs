@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(address) => {
             info!("my address: {}", my_address);
             info!("joining ring {}", address);
-            node.send_message(node::NodeMessage::JoinExisting(address)).await.unwrap();
+            node.send_message(node::NodeMessage::JoinExisting(address)).await?;
         },
         Err(e) => {
             match e {

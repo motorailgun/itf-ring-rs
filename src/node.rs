@@ -128,8 +128,8 @@ impl Node {
 impl NodeState {
     pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _lock = self.lock.lock().await;
-        let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await.unwrap();
-        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await.unwrap();
+        let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await?;
+        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await?;
         let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
         let _ = joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await;
         let _ = joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await;
@@ -139,24 +139,10 @@ impl NodeState {
     }
 
     pub async fn join_existing(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let client = ring_client::RingClient::connect(format!("{}://{}", protocol, address)).await;
-        match client {
-            Ok(mut client) => {
-                let _lock = self.lock.lock().await;
-                let res = client.join(Request::new(JoinRequest {
-                    address: self.address.clone(),
-                })).await;
-
-                match res {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(Box::new(e)),
-                }
-            },
-            Err(e) => {
-                warn!("join: failed to connect {}, {}", address, e);
-                Err(Box::new(e))
-            }
-        }
+        let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, address)).await?;
+        let _lock = self.lock.lock().await;
+        client.join(Request::new(JoinRequest {address: self.address.clone() })).await?;
+        Ok(())
     }
 
     pub async fn set_next(&mut self, address: String) {
