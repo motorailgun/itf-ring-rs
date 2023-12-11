@@ -20,7 +20,7 @@ fn join_address() -> Result<String, GetAddressError> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 2 {
         let s = args[1].clone();
-        if let Ok(_) = s.parse::<SocketAddr>() {
+        if s.parse::<SocketAddr>().is_ok() {
             Ok(s)
         } else {
             Err(GetAddressError::InvalidAddress(s))
@@ -36,8 +36,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
     let my_address: SocketAddr = format!("127.0.0.1:{}", my_port).parse().unwrap();
-    let node = node::Node::new(my_address.clone());
-    let handler = Handler::new(my_address.clone(), node.clone());
+    let node = node::Node::new(my_address);
+    let handler = Handler::new(my_address, node.clone());
     let server = tonic::transport::Server::builder()
         .add_service(ring::ring_server::RingServer::new(handler))
         .serve(my_address);
