@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
     let my_address: SocketAddr = format!("127.0.0.1:{}", my_port).parse().unwrap();
     let node = node::Node::new(my_address.clone());
-    let handler = Handler::new(my_address.clone(), node.get_sender());
+    let handler = Handler::new(my_address.clone(), node.clone());
     let server = tonic::transport::Server::builder()
         .add_service(ring::ring_server::RingServer::new(handler))
         .serve(my_address);
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(address) => {
             info!("my address: {}", my_address);
             info!("joining ring {}", address);
-            node.get_sender().send(node::NodeMessage::JoinExisting(address)).await.unwrap();
+            node.send_message(node::NodeMessage::JoinExisting(address)).await.unwrap();
         },
         Err(e) => {
             match e {

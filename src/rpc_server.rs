@@ -3,17 +3,16 @@ use std::net::SocketAddr;
 use tonic::{Request, Response, Status};
 
 use crate::ring::*;
-use crate::node::NodeMessage;
-use tokio::sync::mpsc;
+use crate::node::{Node, NodeMessage};
 
 #[derive(Debug)]
 pub struct Handler {
     _address: String,
-    sender: mpsc::Sender<NodeMessage>,
+    sender: Node,
 }
 
 impl Handler {
-    pub fn new(address: SocketAddr, sender: mpsc::Sender<NodeMessage>) -> Self {
+    pub fn new(address: SocketAddr, sender: Node) -> Self {
         Handler { _address: address.to_string(), sender }
     }
 }
@@ -26,7 +25,7 @@ impl ring_server::Ring for Handler {
 
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                self.sender.send(NodeMessage::Join(address)).await.unwrap();
+                self.sender.send_message(NodeMessage::Join(address)).await.unwrap();
                 Ok(Response::new(()))
             }
             Err(e) => {
@@ -41,7 +40,7 @@ impl ring_server::Ring for Handler {
         let address = request.into_inner().address;
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                self.sender.send(NodeMessage::SetNext(address)).await.unwrap();
+                self.sender.send_message(NodeMessage::SetNext(address)).await.unwrap();
                 Ok(Response::new(()))
             }
             Err(e) => {
@@ -56,7 +55,7 @@ impl ring_server::Ring for Handler {
         let address = request.into_inner().address;
         match address.parse::<SocketAddr>() {
             Ok(_) => {
-                self.sender.send(NodeMessage::SetPrev(address)).await.unwrap();
+                self.sender.send_message(NodeMessage::SetPrev(address)).await.unwrap();
                 Ok(Response::new(()))
             }
             Err(e) => {
