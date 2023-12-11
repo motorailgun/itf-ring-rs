@@ -42,7 +42,7 @@ impl Node {
         };
         let (sender, mut reciever) = mpsc::channel::<NodeMessage>(16);
 
-        let worker = tokio::spawn(async move {
+        let _worker = tokio::spawn(async move {
             while let Some(message) = reciever.recv().await {
                 match message {
                     NodeMessage::Join(address) => {

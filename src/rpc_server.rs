@@ -8,13 +8,13 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Handler {
-    address: String,
+    _address: String,
     sender: mpsc::Sender<NodeMessage>,
 }
 
 impl Handler {
     pub fn new(address: SocketAddr, sender: mpsc::Sender<NodeMessage>) -> Self {
-        Handler { address: address.to_string(), sender }
+        Handler { _address: address.to_string(), sender }
     }
 }
 
