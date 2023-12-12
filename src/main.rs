@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use log::info;
 use rpc_server::Handler;
 use rand::Rng;
+use std::error::Error;
 
 pub mod ring {
     tonic::include_proto!("ring");
@@ -31,7 +32,7 @@ fn join_address() -> Result<String, GetAddressError> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
@@ -64,8 +65,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let _ = sigint.recv().await;
+        tokio::task::spawn( async move { node.send_message(node::NodeMessage::Leave).await.expect("failed to leave from node"); } ).await?;
+        server.abort();
+    };
     
-    server.await?;
-    node.send_message(node::NodeMessage::Leave).await?;
     Ok(())
 }
