@@ -38,13 +38,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let my_address: SocketAddr = format!("127.0.0.1:{}", my_port).parse().unwrap();
     let node = node::Node::new(my_address);
     let handler = Handler::new(my_address, node.clone());
-    let server = tonic::transport::Server::builder()
-        .add_service(ring::ring_server::RingServer::new(handler))
-        .serve(my_address);
+    let server = tokio::spawn( async move { 
+        tonic::transport::Server::builder()
+            .add_service(ring::ring_server::RingServer::new(handler))
+            .serve(my_address).await.unwrap();
+    });
 
-    
     match join_address() {
         Ok(address) => {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await; // ensure gRPC server to start
             info!("my address: {}", my_address);
             info!("joining ring {}", address);
             node.send_message(node::NodeMessage::JoinExisting(address)).await?;
