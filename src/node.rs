@@ -88,7 +88,7 @@ impl Node {
                         break;
                     },
                     WorkerMessage::LeaveNode(message, tx ) => {
-                        info!("Leaving node: {}, next = {}", &message.leaver, &message.next);
+                        info!("Leaving node: {}, next: {}", &message.leaver, &message.next);
                         let _ = tx.send(node.leave_node(message, "http".into()).await);
                     },
                     WorkerMessage::SetNext(address) => {
