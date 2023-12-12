@@ -66,5 +66,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     
     server.await?;
+    node.send_message(node::NodeMessage::Leave).await?;
     Ok(())
 }

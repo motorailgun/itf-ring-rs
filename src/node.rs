@@ -5,10 +5,17 @@ use log::*;
 use crate::ring::*;
 use tonic::Request;
 
+#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
+pub struct LeaveNodeMessage {
+    pub leaver: String,
+    pub next: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeMessage {
     Join(String),
     JoinExisting(String),
+    LeaveNode(LeaveNodeMessage),
     Leave,
     SetNext(String),
     SetPrev(String),
@@ -18,6 +25,7 @@ pub enum NodeMessage {
 enum WorkerMessage {
     Join(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     JoinExisting(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
+    LeaveNode(LeaveNodeMessage, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     Leave(oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     SetNext(String),
     SetPrev(String),
@@ -33,6 +41,7 @@ pub struct Node {
 
 #[derive(Debug)]
 struct NodeState {
+    // should wrap all members by Mutex, but too lazy to do it
     lock: tokio::sync::Mutex<()>,
     address: String,
     prev: String,
@@ -55,12 +64,12 @@ impl Node {
             while let Some(message) = reciever.recv().await {
                 let res = match message {
                     WorkerMessage::Join(address, tx) => {
-                        debug!("Appending new node: {}", address.clone());
+                        debug!("Appending new node: {}", &address);
                         let _ = tx.send(node.join(address, String::from("http")).await);
                     },
                     WorkerMessage::JoinExisting(address, tx) => {
-                        debug!("Joining to ring at {}", address.clone());
-                        let result = node.join_existing(address, String::from("http")).await;
+                        debug!("Joining to ring at {}", &address);
+                        let result = node.join_existing(address, "http".into()).await;
                         match result {
                             Ok(_) => {
                                 debug!("Joined to ring");
@@ -77,6 +86,10 @@ impl Node {
                         let result = node.leave().await;
                         let _ = tx.send(result);
                         break;
+                    },
+                    WorkerMessage::LeaveNode(message, tx ) => {
+                        info!("Leaving node: {}, next = {}", &message.leaver, &message.next);
+                        let _ = tx.send(node.leave_node(message, "http".into()).await);
                     },
                     WorkerMessage::SetNext(address) => {
                         debug!("Setting next to {}", address);
@@ -120,6 +133,10 @@ impl Node {
                 self.sender.send(WorkerMessage::JoinExisting(address, tx)).await?;
                 check_rx().await
             },
+            NodeMessage::LeaveNode(message) => {
+                self.sender.send(WorkerMessage::LeaveNode(message, tx)).await?;
+                check_rx().await
+            },
             NodeMessage::Leave => {
                 self.sender.send(WorkerMessage::Leave(tx)).await?;
                 check_rx().await as Result<(), Box<dyn Error>>
@@ -138,11 +155,11 @@ impl NodeState {
     pub async fn join(&mut self, address: String, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _lock = self.lock.lock().await;
         debug!("join message: {}", &address);
-        let mut joinner_client = dbg!(ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await)?;
-        let mut next_client = dbg!(ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await)?;
-        let _ = dbg!(next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await);
-        let _ = dbg!(joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await);
-        let _ = dbg!(joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await);
+        let mut joinner_client = ring_client::RingClient::connect(format!("{}://{}", protocol, address.clone())).await?;
+        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await?;
+        let _ = next_client.set_prev(Request::new(SetPrevRequest { address: address.clone() })).await;
+        let _ = joinner_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await;
+        let _ = joinner_client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await;
 
         self.next = address;
         Ok(())
@@ -166,6 +183,19 @@ impl NodeState {
         let _lock = self.lock.lock().await;
         debug!("set_prev message: {}", &address);
         self.prev = address;
+    }
+
+    pub async fn leave_node(&mut self, message: LeaveNodeMessage, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let _lock = self.lock.lock().await;
+        debug!("leave_node message: {:?}", &message);
+
+        let LeaveNodeMessage { leaver, next } = message;
+        let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, next)).await?;
+        let _ = client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await?;
+        self.next = next;
+
+        info!("node {} left", leaver);
+        Ok(())
     }
 
     pub async fn leave(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
