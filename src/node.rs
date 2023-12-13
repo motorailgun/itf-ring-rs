@@ -5,17 +5,10 @@ use log::*;
 use crate::ring::*;
 use tonic::Request;
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
-pub struct LeaveNodeMessage {
-    pub leaver: String,
-    pub next: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NodeMessage {
     Join(String),
     JoinExisting(String),
-    LeaveNode(LeaveNodeMessage),
     Leave,
     SetNext(String),
     SetPrev(String),
@@ -25,7 +18,6 @@ pub enum NodeMessage {
 enum WorkerMessage {
     Join(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     JoinExisting(String, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
-    LeaveNode(LeaveNodeMessage, oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     Leave(oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>),
     SetNext(String),
     SetPrev(String),
@@ -83,13 +75,9 @@ impl Node {
                     },
                     WorkerMessage::Leave(tx) => {
                         info!("Leaving");
-                        let result = node.leave().await;
+                        let result = node.leave("http".into()).await;
                         let _ = tx.send(result);
                         break;
-                    },
-                    WorkerMessage::LeaveNode(message, tx ) => {
-                        info!("Leaving node: {}, next: {}", &message.leaver, &message.next);
-                        let _ = tx.send(node.leave_node(message, "http".into()).await);
                     },
                     WorkerMessage::SetNext(address) => {
                         debug!("Setting next to {}", address);
@@ -131,10 +119,6 @@ impl Node {
             },
             NodeMessage::JoinExisting(address) => {
                 self.sender.send(WorkerMessage::JoinExisting(address, tx)).await?;
-                check_rx().await
-            },
-            NodeMessage::LeaveNode(message) => {
-                self.sender.send(WorkerMessage::LeaveNode(message, tx)).await?;
                 check_rx().await
             },
             NodeMessage::Leave => {
@@ -185,21 +169,17 @@ impl NodeState {
         self.prev = address;
     }
 
-    pub async fn leave_node(&mut self, message: LeaveNodeMessage, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn leave(&self, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         let _lock = self.lock.lock().await;
-        debug!("leave_node message: {:?}", &message);
+        debug!("leave message");
+        
+        let mut next_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.next.clone())).await?;
+        let mut prev_client = ring_client::RingClient::connect(format!("{}://{}", protocol, self.prev.clone())).await?;
 
-        let LeaveNodeMessage { leaver, next } = message;
-        let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, next)).await?;
-        let _ = client.set_prev(Request::new(SetPrevRequest { address: self.address.clone() })).await?;
-        self.next = next;
+        let _ = next_client.set_prev(Request::new(SetPrevRequest { address: self.prev.clone() })).await?;
+        let _ = prev_client.set_next(Request::new(SetNextRequest { address: self.next.clone() })).await?;
 
-        info!("node {} left", leaver);
         Ok(())
-    }
-
-    pub async fn leave(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        unimplemented!();
     }
 
     pub async fn show_state(&self) {
