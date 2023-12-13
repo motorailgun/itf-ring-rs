@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let my_port: u16 = rand::thread_rng().gen_range(10000..(2u32.pow(16) - 1).try_into()?);
     let my_address: SocketAddr = format!("127.0.0.1:{}", my_port).parse().unwrap();
-    let node = node::Node::new(my_address);
+    let (node, joinhandlers) = node::Node::new(my_address);
     let handler = Handler::new(my_address, node.clone());
     let server = tokio::spawn( async move { 
         tonic::transport::Server::builder()
@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut sigint = signal(SignalKind::interrupt())?;
         let _ = sigint.recv().await;
         tokio::task::spawn( async move { node.send_message(node::NodeMessage::Leave).await.expect("failed to leave from node"); } ).await?;
+        joinhandlers.into_iter().for_each(|h| h.abort());
         server.abort();
     };
     
