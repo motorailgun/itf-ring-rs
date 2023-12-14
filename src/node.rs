@@ -275,7 +275,7 @@ impl NodeState {
 
             let last = list.last().unwrap().address.clone();
             if last != lock.address {
-                let address = format!("{}://{}", protocol, &lock.address);
+                let address = format!("{}://{}", protocol, &lock.next);
                 tokio::spawn(async move {
                     let client = ring_client::RingClient::connect(address).await;
                     if client.is_err() {
