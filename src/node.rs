@@ -180,8 +180,7 @@ impl Node {
                 check_rx().await
             },
             NodeMessage::ShareNodes(list) => {
-                self.sender.send(WorkerMessage::ShareNodes(list, tx)).await?;
-                check_rx().await
+                self.sender.send(WorkerMessage::ShareNodes(list, tx)).await.map_err(|e| Box::new(e).into())
             },
         }
     }
@@ -240,6 +239,7 @@ impl NodeState {
         debug!("  address: {}", &lock.address);
         debug!("  prev: {}", &lock.prev);
         debug!("  next: {}", &lock.next);
+        debug!("  is_leader: {}", &lock.is_leader);
     }
 
     pub async fn list_nodes(&self, mut list: Vec<NodeInfo>, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -253,21 +253,18 @@ impl NodeState {
     }
 
     pub async fn share_nodes(&self, list: Vec<NodeInfo>, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut lock = self.lock.lock().await;
         debug!("share_nodes message: {:?}", &list);
 
         if list.len() == 0 {
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "empty list given")) as Box<dyn Error + Send + Sync>);
         }
 
-        lock.last_heartbeat = std::time::Instant::now();
-
         let mut list = list;
         list.sort_unstable_by(|a, b| a.number.cmp(&b.number));
         let first = list.first().unwrap().address.clone();
 
-        let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, &lock.address)).await?;
-        let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await?;
+        let mut lock = self.lock.lock().await;
+        lock.last_heartbeat = std::time::Instant::now();
     
         if first == lock.address {
             debug!("share_nodes: head is self, I AM LEADER");
@@ -275,6 +272,19 @@ impl NodeState {
         } else {
             debug!("share_nodes: becoming follower");
             lock.is_leader = false;
+
+            let last = list.last().unwrap().address.clone();
+            if last != lock.address {
+                let address = format!("{}://{}", protocol, &lock.address);
+                tokio::spawn(async move {
+                    let client = ring_client::RingClient::connect(address).await;
+                    if client.is_err() {
+                        return;
+                    }
+                    let mut client = client.unwrap();
+                    let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
+                });
+            }
         }
 
         Ok(())
