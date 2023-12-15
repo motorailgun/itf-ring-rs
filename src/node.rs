@@ -43,6 +43,7 @@ struct NodeInternal {
     next: String,
     is_leader: bool,
     last_heartbeat: std::time::Instant,
+    last_list: Vec<NodeInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,9 +60,10 @@ impl Node {
                 NodeInternal {
                     address: address.clone(),
                     prev: address.clone(),
-                    next: address,
+                    next: address.clone(),
                     is_leader: false,
                     last_heartbeat: std::time::Instant::now(),
+                    last_list: vec![NodeInfo {number: 0, address: address}],
                 }
             )),
         };
@@ -177,7 +179,6 @@ impl Node {
             },
             NodeMessage::ListNodes(list) => {
                 self.sender.send(WorkerMessage::ListNodes(list, tx)).await.map_err(|e| Box::new(e).into())
-                // check_rx().await
             },
             NodeMessage::ShareNodes(list) => {
                 self.sender.send(WorkerMessage::ShareNodes(list, tx)).await.map_err(|e| Box::new(e).into())
@@ -251,6 +252,8 @@ impl NodeState {
         if list.first().unwrap().address == lock.address {
             info!("list_nodes: head is self, invoking share_nodes");
             let my_address = lock.address.clone();
+            lock.last_list = list.clone();
+
             tokio::spawn(async move {
                 let client = ring_client::RingClient::connect(format!("{}://{}", protocol, my_address)).await;
                 if client.is_err() {
@@ -285,23 +288,25 @@ impl NodeState {
         if first == lock.address {
             debug!("share_nodes: head is self, I AM A LEADER");
             lock.is_leader = true;
+            
+            return Ok(())
         } else {
             debug!("share_nodes: becoming follower");
             lock.is_leader = false;
 
             let last = list.last().unwrap().address.clone();
-            if last != lock.address {
-                let address = format!("{}://{}", protocol, &lock.next);
-                tokio::spawn(async move {
-                    let client = ring_client::RingClient::connect(address).await;
-                    if client.is_err() {
-                        return;
-                    }
-                    let mut client = client.unwrap();
-                    let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
-                });
-            }
+            if last == lock.address { return Ok(()); }
         }
+
+        let address = format!("{}://{}", protocol, &lock.next);
+        tokio::spawn(async move {
+            let client = ring_client::RingClient::connect(address).await;
+            if client.is_err() {
+                return;
+            }
+            let mut client = client.unwrap();
+            let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
+        });
 
         Ok(())
     }
