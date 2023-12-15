@@ -268,6 +268,8 @@ impl NodeState {
                 }
             }
 
+            //TODO: implement handling for when this node is the end of the ring
+
             for node in list.iter().skip_while(|n| n.address != lock.next) {
                 let client = ring_client::RingClient::connect(format!("{}://{}", &protocol, &node.address)).await;
                 if client.is_err() {
