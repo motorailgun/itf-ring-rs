@@ -254,18 +254,31 @@ impl NodeState {
             let my_address = lock.address.clone();
             lock.last_list = list.clone();
 
-            tokio::spawn(async move {
-                let client = ring_client::RingClient::connect(format!("{}://{}", protocol, my_address)).await;
-                if client.is_err() {
-                    return;
-                }
-                let mut client = client.unwrap();
-                let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
-            });
+            let mut client = ring_client::RingClient::connect(format!("{}://{}", &protocol, my_address)).await?;
+            let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
         } else {
             list.push(NodeInfo { number: list.first().unwrap().number + 1, address: lock.address.clone() });
-            let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, &lock.next)).await?;
-            let _ = client.list_nodes(Request::new(NodeList { nodes: list })).await?;
+
+            for _ in (0..2).into_iter() {
+                let mut client = ring_client::RingClient::connect(format!("{}://{}", &protocol, &lock.next)).await?;
+                let res = client.list_nodes(Request::new(NodeList { nodes: list.clone() })).await;
+
+                if res.is_ok() {
+                    return Ok(())
+                }
+            }
+
+            for node in list.iter().skip_while(|n| n.address != lock.next) {
+                let client = ring_client::RingClient::connect(format!("{}://{}", &protocol, &node.address)).await;
+                if client.is_err() {
+                    continue;
+                }
+                let mut client = client.unwrap();
+                let _ = client.list_nodes(Request::new(NodeList { nodes: list.clone() })).await?;
+                let _ = client.set_prev(Request::new(SetPrevRequest { address: lock.address.clone() })).await?;
+                lock.next = node.address.clone();
+                break;
+            }
         }
 
         Ok(())
@@ -288,7 +301,7 @@ impl NodeState {
         if first == lock.address {
             debug!("share_nodes: head is self, I AM A LEADER");
             lock.is_leader = true;
-            
+
             return Ok(())
         } else {
             debug!("share_nodes: becoming follower");
