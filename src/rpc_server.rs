@@ -7,6 +7,7 @@ use crate::node::{Node, NodeMessage};
 
 #[derive(Debug)]
 pub struct Handler {
+    #[allow(dead_code)]
     address: String,
     sender: Node,
 }
@@ -78,16 +79,6 @@ impl ring_server::Ring for Handler {
         
         if list.len() == 0 {
             return Err(Status::invalid_argument("empty list given"));
-        } else if  list[0].address == self.address {
-            debug!("list_nodes: head is self, invoking share");
-            let res = self.sender.send_message(NodeMessage::ShareNodes(list)).await;
-            match res {
-                Ok(_) => (),
-                Err(e) => {
-                    error!("list_nodes: failed to process list_nodes request: {}", e);
-                    return Err(Status::internal("failed to send message"));
-                }
-            }
         } else {
             let res = self.sender.send_message(NodeMessage::ListNodes(list)).await;
             match res {

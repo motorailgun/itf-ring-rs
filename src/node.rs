@@ -129,7 +129,7 @@ impl Node {
                 if node.is_leader {
                     let mut list = Vec::new();
                     list.push(NodeInfo { number: 0, address: node.address.clone() });
-                    let mut client = ring_client::RingClient::connect(format!("http://{}", node.address.clone())).await.unwrap();
+                    let mut client = ring_client::RingClient::connect(format!("http://{}", &node.next)).await.unwrap();
                     let _ = client.list_nodes(Request::new(NodeList { nodes: list })).await;
                 } else { 
                     let now = std::time::Instant::now();
@@ -176,8 +176,8 @@ impl Node {
                 self.sender.send(WorkerMessage::SetPrev(address)).await.map_err(|e| Box::new(e).into())
             },
             NodeMessage::ListNodes(list) => {
-                self.sender.send(WorkerMessage::ListNodes(list, tx)).await?;
-                check_rx().await
+                self.sender.send(WorkerMessage::ListNodes(list, tx)).await.map_err(|e| Box::new(e).into())
+                // check_rx().await
             },
             NodeMessage::ShareNodes(list) => {
                 self.sender.send(WorkerMessage::ShareNodes(list, tx)).await.map_err(|e| Box::new(e).into())
@@ -243,12 +243,28 @@ impl NodeState {
     }
 
     pub async fn list_nodes(&self, mut list: Vec<NodeInfo>, protocol: String) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let lock = self.lock.lock().await;
+        let mut lock = self.lock.lock().await;
         debug!("list_nodes message");
+        lock.last_heartbeat = std::time::Instant::now();
 
-        list.push(NodeInfo { number: list.first().unwrap().number + 1, address: lock.address.clone() });
-        let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, &lock.next)).await?;
-        let _ = client.list_nodes(Request::new(NodeList { nodes: list })).await?;
+        list.sort_unstable_by(|a, b| a.number.cmp(&b.number));
+        if list.first().unwrap().address == lock.address {
+            info!("list_nodes: head is self, invoking share_nodes");
+            let my_address = lock.address.clone();
+            tokio::spawn(async move {
+                let client = ring_client::RingClient::connect(format!("{}://{}", protocol, my_address)).await;
+                if client.is_err() {
+                    return;
+                }
+                let mut client = client.unwrap();
+                let _ = client.share_nodes(Request::new(NodeList { nodes: list })).await;
+            });
+        } else {
+            list.push(NodeInfo { number: list.first().unwrap().number + 1, address: lock.address.clone() });
+            let mut client = ring_client::RingClient::connect(format!("{}://{}", protocol, &lock.next)).await?;
+            let _ = client.list_nodes(Request::new(NodeList { nodes: list })).await?;
+        }
+
         Ok(())
     }
 
@@ -267,7 +283,7 @@ impl NodeState {
         lock.last_heartbeat = std::time::Instant::now();
     
         if first == lock.address {
-            debug!("share_nodes: head is self, I AM LEADER");
+            debug!("share_nodes: head is self, I AM A LEADER");
             lock.is_leader = true;
         } else {
             debug!("share_nodes: becoming follower");
